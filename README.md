@@ -1,4 +1,4 @@
-[![](https://i.imgur.com/UetIFyH.jpg)](#)
+[![](https://i.imgur.com/UelUjKAh.png)](#)
 
 Table of Contents
 =======================

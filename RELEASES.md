@@ -1,3 +1,7 @@
+Version 0.7.2 (2020-XX-XX)
+========================
+ * Improve driver monitoring under extreme lighting and add low accuracy alert
+
 Version 0.7.1 (2020-01-20)
 ========================
  * comma two support!
