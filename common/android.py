@@ -4,7 +4,6 @@ import itertools
 import re
 import struct
 import subprocess
-import random
 
 ANDROID = os.path.isfile('/EON')
 
@@ -20,8 +19,7 @@ def get_imei(slot):
 
   ret = parse_service_call_string(service_call(["iphonesubinfo", "3" ,"i32", str(slot)]))
   if not ret:
-    # allow non android to be identified differently
-    ret = "%015d" % random.randint(0, 1<<32)
+    ret = "000000000000000"
   return ret
 
 def get_serial():
