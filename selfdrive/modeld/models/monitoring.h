@@ -17,7 +17,9 @@ extern "C" {
 
 typedef struct MonitoringResult {
   float face_orientation[3];
+  float face_orientation_meta[3];
   float face_position[2];
+  float face_position_meta[2];
   float face_prob;
   float left_eye_prob;
   float right_eye_prob;
