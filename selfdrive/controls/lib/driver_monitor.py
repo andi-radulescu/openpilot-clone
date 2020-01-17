@@ -17,6 +17,7 @@ _BLINK_THRESHOLD = 0.5 # 0.225
 _BLINK_THRESHOLD_SLACK = 0.65
 _BLINK_THRESHOLD_STRICT = 0.5
 _PITCH_WEIGHT = 1.35 # 1.5  # pitch matters a lot more
+_POSESTD_THRESHOLD = 0.14
 _METRIC_THRESHOLD = 0.4
 _METRIC_THRESHOLD_SLACK = 0.55
 _METRIC_THRESHOLD_STRICT = 0.4
@@ -24,6 +25,7 @@ _PITCH_POS_ALLOWANCE = 0.12 # rad, to not be too sensitive on positive pitch
 _PITCH_NATURAL_OFFSET = 0.02 # people don't seem to look straight when they drive relaxed, rather a bit up
 _YAW_NATURAL_OFFSET = 0.08 # people don't seem to look straight when they drive relaxed, rather a bit to the right (center of car)
 
+_HI_STD_TIMEOUT = 2
 _DISTRACTED_FILTER_TS = 0.25  # 0.6Hz
 
 _POSE_CALIB_MIN_SPEED = 13 # 30 mph
@@ -71,8 +73,12 @@ class DriverPose():
     self.yaw = 0.
     self.pitch = 0.
     self.roll = 0.
+    self.yaw_std = 0.
+    self.pitch_std = 0.
+    self.roll_std = 0.
     self.pitch_offseter = RunningStatFilter(max_trackable=_POSE_OFFSET_MAX_COUNT)
     self.yaw_offseter = RunningStatFilter(max_trackable=_POSE_OFFSET_MAX_COUNT)
+    self.low_std = True
     self.cfactor = 1.
 
 class DriverBlink():
@@ -97,6 +103,7 @@ class DriverStatus():
     self.terminal_time = 0
     self.step_change = 0.
     self.active_monitoring_mode = True
+    self.hi_stds = 0
     self.threshold_prompt = _DISTRACTED_PROMPT_TIME_TILL_TERMINAL / _DISTRACTED_TIME
 
     self.is_rhd_region = False
@@ -162,23 +169,28 @@ class DriverStatus():
 
   def get_pose(self, driver_monitoring, cal_rpy, car_speed, op_engaged):
     # 10 Hz
-    if len(driver_monitoring.faceOrientation) == 0 or len(driver_monitoring.facePosition) == 0:
+    if len(driver_monitoring.faceOrientation) == 0 or len(driver_monitoring.facePosition) == 0 or len(driver_monitoring.faceOrientationStd) == 0 or len(driver_monitoring.facePositionStd) == 0:
       return
 
     self.pose.roll, self.pose.pitch, self.pose.yaw = face_orientation_from_net(driver_monitoring.faceOrientation, driver_monitoring.facePosition, cal_rpy)
+    self.pose.pitch_std = driver_monitoring.faceOrientationStd[0]
+    self.pose.yaw_std = driver_monitoring.faceOrientationStd[1]
+    # self.pose.roll_std = driver_monitoring.faceOrientationStd[2]
+    max_std = np.max([self.pose.pitch_std, self.pose.yaw_std])
+    self.pose.low_std = max_std < _POSESTD_THRESHOLD
     self.blink.left_blink = driver_monitoring.leftBlinkProb * (driver_monitoring.leftEyeProb>_EYE_THRESHOLD)
     self.blink.right_blink = driver_monitoring.rightBlinkProb * (driver_monitoring.rightEyeProb>_EYE_THRESHOLD)
     self.face_detected = driver_monitoring.faceProb > _FACE_THRESHOLD and \
                           abs(driver_monitoring.facePosition[0]) <= 0.4 and abs(driver_monitoring.facePosition[1]) <= 0.45 and \
                           not self.is_rhd_region
 
-    self.driver_distracted = self._is_driver_distracted(self.pose, self.blink)>0
+    self.driver_distracted = self._is_driver_distracted(self.pose, self.blink) > 0
     # first order filters
     self.driver_distraction_filter.update(self.driver_distracted)
 
     # update offseter
     # only update when driver is actively driving the car above a certain speed
-    if self.face_detected and car_speed>_POSE_CALIB_MIN_SPEED and (not op_engaged or not self.driver_distracted):
+    if self.face_detected and car_speed>_POSE_CALIB_MIN_SPEED and self.pose.low_std and (not op_engaged or not self.driver_distracted):
       self.pose.pitch_offseter.push_and_update(self.pose.pitch)
       self.pose.yaw_offseter.push_and_update(self.pose.yaw)
 
@@ -186,6 +198,11 @@ class DriverStatus():
                             self.pose.yaw_offseter.filtered_stat.n > _POSE_OFFSET_MIN_COUNT
 
     self._set_timers(self.face_detected)
+    if self.face_detected and not self.pose.low_std:
+      self.step_change *= max(0, (max_std-0.5)*(max_std-2))
+      self.hi_stds += 1
+    elif self.face_detected and self.pose.low_std:
+      self.hi_stds = 0
 
   def update(self, events, driver_engaged, ctrl_active, standstill):
     if (driver_engaged and self.awareness > 0) or not ctrl_active:
@@ -197,6 +214,9 @@ class DriverStatus():
 
     driver_attentive = self.driver_distraction_filter.x < 0.37
     awareness_prev = self.awareness
+
+    if self.face_detected and self.hi_stds * DT_DMON > _HI_STD_TIMEOUT:
+      events.append(create_event('driverMonitorLowAcc', [ET.WARNING]))
 
     if (driver_attentive and self.face_detected and self.awareness > 0):
       # only restore awareness when paying attention and alert is not red

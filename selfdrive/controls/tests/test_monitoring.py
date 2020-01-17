@@ -4,7 +4,8 @@ from common.realtime import DT_CTRL, DT_DMON
 from selfdrive.controls.lib.driver_monitor import DriverStatus, MAX_TERMINAL_ALERTS, \
                                   _AWARENESS_TIME, _AWARENESS_PRE_TIME_TILL_TERMINAL, \
                                   _AWARENESS_PROMPT_TIME_TILL_TERMINAL, _DISTRACTED_TIME, \
-                                  _DISTRACTED_PRE_TIME_TILL_TERMINAL, _DISTRACTED_PROMPT_TIME_TILL_TERMINAL
+                                  _DISTRACTED_PRE_TIME_TILL_TERMINAL, _DISTRACTED_PROMPT_TIME_TILL_TERMINAL, \
+                                  _POSESTD_THRESHOLD, _HI_STD_TIMEOUT
 from selfdrive.controls.lib.gps_helpers import is_rhd_region
 
 _TEST_TIMESPAN = 120 # seconds
@@ -12,9 +13,10 @@ _DISTRACTED_SECONDS_TO_ORANGE = _DISTRACTED_TIME - _DISTRACTED_PROMPT_TIME_TILL_
 _DISTRACTED_SECONDS_TO_RED = _DISTRACTED_TIME + 1
 _INVISIBLE_SECONDS_TO_ORANGE = _AWARENESS_TIME - _AWARENESS_PROMPT_TIME_TILL_TERMINAL + 1
 _INVISIBLE_SECONDS_TO_RED = _AWARENESS_TIME + 1
+_UNCERTAIN_SECONDS_TO_GREEN = _HI_STD_TIMEOUT + 0.5
 
 class fake_DM_msg():
-  def __init__(self, is_face_detected, is_distracted=False):
+  def __init__(self, is_face_detected, is_distracted=False, is_model_uncertain=False):
     self.faceOrientation = [0.,0.,0.]
     self.facePosition = [0.,0.]
     self.faceProb = 1. * is_face_detected
@@ -22,12 +24,17 @@ class fake_DM_msg():
     self.rightEyeProb = 1.
     self.leftBlinkProb = 1. * is_distracted
     self.rightBlinkProb = 1. * is_distracted
+    self.faceOrientationStd = [1.*is_model_uncertain,1.*is_model_uncertain,1.*is_model_uncertain]
+    self.facePositionStd = [1.*is_model_uncertain,1.*is_model_uncertain]
 
 
 # driver state from neural net, 10Hz
 msg_NO_FACE_DETECTED = fake_DM_msg(is_face_detected=False)
 msg_ATTENTIVE = fake_DM_msg(is_face_detected=True)
 msg_DISTRACTED = fake_DM_msg(is_face_detected=True, is_distracted=True)
+msg_ATTENTIVE_UNCERTAIN = fake_DM_msg(is_face_detected=True, is_model_uncertain=True)
+msg_DISTRACTED_UNCERTAIN = fake_DM_msg(is_face_detected=True, is_distracted=True, is_model_uncertain=True)
+msg_DISTRACTED_BUT_SOMEHOW_UNCERTAIN = fake_DM_msg(is_face_detected=True, is_distracted=True, is_model_uncertain=_POSESTD_THRESHOLD*1.5)
 
 # driver interaction with car
 car_interaction_DETECTED = True
@@ -194,6 +201,33 @@ class TestMonitoring(unittest.TestCase):
     self.assertEqual(events_output[int((_DISTRACTED_TIME-_DISTRACTED_PRE_TIME_TILL_TERMINAL+1)/DT_DMON)][0].name, 'preDriverDistracted')
     self.assertEqual(events_output[int((_redlight_time-0.1)/DT_DMON)][0].name, 'preDriverDistracted')
     self.assertEqual(events_output[int((_redlight_time+0.5)/DT_DMON)][0].name, 'promptDriverDistracted')
+
+  # 9. op engaged, model is extremely uncertain. driver first attentive, then distracted
+  #  - should only pop the green alert about model uncertainty
+  #  - (note: this's just for sanity check, std output should never be this high)
+  def test_one_indecisive_model(self):
+    ds_vector = [msg_ATTENTIVE_UNCERTAIN] * int(_UNCERTAIN_SECONDS_TO_GREEN/DT_DMON) + \
+                [msg_ATTENTIVE] * int(_DISTRACTED_SECONDS_TO_ORANGE/DT_DMON) + \
+                [msg_DISTRACTED_UNCERTAIN] * (int(_TEST_TIMESPAN/DT_DMON)-int((_DISTRACTED_SECONDS_TO_ORANGE+_UNCERTAIN_SECONDS_TO_GREEN)/DT_DMON))
+    interaction_vector = always_false[:]
+    events_output = run_DState_seq(ds_vector, interaction_vector, always_true, always_false)
+    self.assertTrue(len(events_output[int(_UNCERTAIN_SECONDS_TO_GREEN*0.5/DT_DMON)])==0)
+    self.assertEqual(events_output[int((_UNCERTAIN_SECONDS_TO_GREEN-0.1)/DT_DMON)][0].name, 'driverMonitorLowAcc')
+    self.assertTrue(len(events_output[int((_UNCERTAIN_SECONDS_TO_GREEN+_DISTRACTED_SECONDS_TO_ORANGE-0.5)/DT_DMON)])==0)
+    self.assertEqual(events_output[int((_TEST_TIMESPAN-5.)/DT_DMON)][0].name, 'driverMonitorLowAcc')
+
+  # 10. op engaged, model is somehow uncertain and driver is distracted
+  #  - should slow down the alert countdown but it still gets there
+  def test_somehow_indecisive_model(self):
+    ds_vector = [msg_DISTRACTED_BUT_SOMEHOW_UNCERTAIN] * int(_TEST_TIMESPAN/DT_DMON)
+    interaction_vector = always_false[:]
+    events_output = run_DState_seq(ds_vector, interaction_vector, always_true, always_false)
+    self.assertTrue(len(events_output[int(_UNCERTAIN_SECONDS_TO_GREEN*0.5/DT_DMON)])==0)
+    self.assertEqual(events_output[int((_UNCERTAIN_SECONDS_TO_GREEN)/DT_DMON)][0].name, 'driverMonitorLowAcc')
+    self.assertEqual(events_output[int((2.5*(_DISTRACTED_TIME-_DISTRACTED_PRE_TIME_TILL_TERMINAL))/DT_DMON)][1].name, 'preDriverDistracted')
+    self.assertEqual(events_output[int((2.5*(_DISTRACTED_TIME-_DISTRACTED_PROMPT_TIME_TILL_TERMINAL))/DT_DMON)][1].name, 'promptDriverDistracted')
+    self.assertEqual(events_output[int((_DISTRACTED_TIME+1)/DT_DMON)][1].name, 'promptDriverDistracted')
+    self.assertEqual(events_output[int((_DISTRACTED_TIME*2.5)/DT_DMON)][1].name, 'driverDistracted')
 
 if __name__ == "__main__":
   print('MAX_TERMINAL_ALERTS', MAX_TERMINAL_ALERTS)
