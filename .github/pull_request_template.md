@@ -1,21 +1,52 @@
-Choose one of the templates below:
+<!--
 
-# Fingerprint
-This pull requests adds a fingerprint for <Make - Model - Year - Trim>.
+Please copy and paste the relevant template
 
-This is an explorer link to a drive with the stock system enabled: ...
 
-# Car support
-This pull requests adds support for <Make - Model - Year - Trim>.
+<!-- ***** Template: Car bug fix ***** -->
 
-This is an explorer link to a drive with the stock system enabled: ...
-This is an explorer link to a drive with openpilot system enabled: ...
+**Description**
 
-# Feature
-This pull requests adds feature X
+<!-- A description of the bug and the fix. Also link any relevant issues. -->
 
-## Description
-Explain what the feature does
+**Verification**
 
-## Testing
-Explain how the feature was tested. Either by the added unit tests, or what tests were performed while driving.
+<!-- Explain how you tested this bug fix. -->
+
+**Route**
+
+Route: [a route with the bug fix]
+
+
+<!-- ***** Template: Bug fix ***** -->
+
+**Description**
+
+<!-- A description of the bug and the fix. Also link the issue if it exists. -->
+
+**Verification**
+
+<!-- Explain how you tested this bug fix. -->
+
+
+<!-- ***** Template: Car port ***** -->
+
+**Checklist**
+
+- [ ] added to README
+- [ ] test route added to [test_car_models](../../selfdrive/test/test_car_models.py)
+- [ ] route with openpilot:
+- [ ] route with stock system:
+
+
+<!-- ***** Template: Refactor ***** -->
+
+**Description**
+
+<!-- A description of the refactor, including the goals it accomplishes. -->
+
+**Verification**
+
+<!-- Explain how you tested the refactor for regressions. -->
+
+-->
