@@ -4,7 +4,6 @@ from functools import cache
 from urllib.parse import urlparse
 from collections import defaultdict
 from itertools import chain
-from typing import Optional
 
 from openpilot.tools.lib.auth_config import get_token
 from openpilot.tools.lib.api import CommaApi
@@ -231,50 +230,73 @@ class SegmentName:
   def route_name(self) -> RouteName: return self._route_name
 
   @property
-  def data_dir(self) -> Optional[str]: return self._data_dir
+  def data_dir(self) -> str | None: return self._data_dir
 
   def __str__(self) -> str: return self._canonical_name
 
 
 @cache
-def get_max_seg_number_cached(sr: 'SegmentRange'):
+def get_max_seg_number_cached(sr: 'SegmentRange') -> int:
   try:
     api = CommaApi(get_token())
-    return api.get("/v1/route/" + sr.route_name.replace("/", "|"))["segment_numbers"][-1]
+    max_seg_number = api.get("/v1/route/" + sr.route_name.replace("/", "|"))["maxqlog"]
+    assert isinstance(max_seg_number, int)
+    return max_seg_number
   except Exception as e:
     raise Exception("unable to get max_segment_number. ensure you have access to this route or the route is public.") from e
 
 
 class SegmentRange:
   def __init__(self, segment_range: str):
-    self.m = re.fullmatch(RE.SEGMENT_RANGE, segment_range)
-    assert self.m, f"Segment range is not valid {segment_range}"
-
-  def get_max_seg_number(self):
-    return get_max_seg_number_cached(self)
+    m = re.fullmatch(RE.SEGMENT_RANGE, segment_range)
+    assert m is not None, f"Segment range is not valid {segment_range}"
+    self.m = m
 
   @property
-  def route_name(self):
+  def route_name(self) -> str:
     return self.m.group("route_name")
 
   @property
-  def dongle_id(self):
+  def dongle_id(self) -> str:
     return self.m.group("dongle_id")
 
   @property
-  def timestamp(self):
+  def timestamp(self) -> str:
     return self.m.group("timestamp")
 
   @property
-  def _slice(self):
-    return self.m.group("slice")
+  def log_id(self) -> str:
+    return self.m.group("log_id")
 
   @property
-  def selector(self):
+  def slice(self) -> str:
+    return self.m.group("slice") or ""
+
+  @property
+  def selector(self) -> str | None:
     return self.m.group("selector")
 
-  def __str__(self):
-    return f"{self.dongle_id}/{self.timestamp}" + (f"/{self._slice}" if self._slice else "") + (f"/{self.selector}" if self.selector else "")
+  @property
+  def seg_idxs(self) -> list[int]:
+    m = re.fullmatch(RE.SLICE, self.slice)
+    assert m is not None, f"Invalid slice: {self.slice}"
+    start, end, step = (None if s is None else int(s) for s in m.groups())
 
-  def __repr__(self):
+    # one segment specified
+    if start is not None and end is None and ':' not in self.slice:
+      if start < 0:
+        start += get_max_seg_number_cached(self) + 1
+      return [start]
+
+    s = slice(start, end, step)
+    # no specified end or using relative indexing, need number of segments
+    if end is None or end < 0 or (start is not None and start < 0):
+      return list(range(get_max_seg_number_cached(self) + 1))[s]
+    else:
+      return list(range(end + 1))[s]
+
+  def __str__(self) -> str:
+    return f"{self.dongle_id}/{self.log_id}" + (f"/{self.slice}" if self.slice else "") + (f"/{self.selector}" if self.selector else "")
+
+  def __repr__(self) -> str:
     return self.__str__()
