@@ -85,7 +85,7 @@ def process(lr):
 
 def load_route(route_or_segment_name):
   print("Loading log...")
-  sr = LogReader(args.route_or_segment_name)
+  sr = LogReader(route_or_segment_name)
   CP = sr.first("carParams")
   print(f"carFingerprint (for hardcoding fingerprint): '{CP.carFingerprint}'")
   CAN_MSGS = sr.run_across_segments(24, process)
